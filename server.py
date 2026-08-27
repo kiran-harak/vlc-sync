@@ -202,13 +202,15 @@ def main():
     app.router.add_get("/",       websocket_handler)
     app.router.add_get("/stream", stream_handler)
 
+    port = int(os.environ.get("PORT", 8765))
+
     logging.info("=" * 55)
-    logging.info("  VLC Sync Server  —  port 8765")
-    logging.info("  WebSocket : ws://0.0.0.0:8765/")
-    logging.info("  Stream    : http://0.0.0.0:8765/stream")
+    logging.info(f"  VLC Sync Server  —  port {port}")
+    logging.info(f"  WebSocket : ws://0.0.0.0:{port}/")
+    logging.info(f"  Stream    : http://0.0.0.0:{port}/stream")
     logging.info("=" * 55)
 
-    web.run_app(app, host="0.0.0.0", port=8765, access_log=None)
+    web.run_app(app, host="0.0.0.0", port=port, access_log=None)
 
 
 if __name__ == "__main__":
