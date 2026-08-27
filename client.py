@@ -99,7 +99,7 @@ class LocalFileServer:
         app.router.add_get("/", self._handle)
         self.runner = aiohttp_web.AppRunner(app)
         await self.runner.setup()
-        await aiohttp_web.TCPSite(self.runner, "0.0.0.0", STREAM_PORT).start()
+        await aiohttp_web.TCPSite(self.runner, "0.0.0.0", STREAM_PORT, reuse_address=True).start()
         logging.info(f"File server on port {STREAM_PORT}")
 
     async def stop(self):
@@ -228,6 +228,7 @@ class VLCSyncClient(QMainWindow):
         self.is_fullscreen = False
         self._sub_idx = 0; self._aud_idx = 1
         self.is_sharing = False
+        self._sharing_starting = False   # blocks _broadcast while tunnel is starting
         self._file_server = LocalFileServer()
         self._cf_tunnel = CloudflareTunnel()
 
@@ -481,10 +482,17 @@ class VLCSyncClient(QMainWindow):
         fname, _ = QFileDialog.getOpenFileName(self, "Select Movie to Share", "",
             "Video Files (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.webm *.ts *.m4v);;All Files (*)")
         if not fname: return
+
+        # Pause broadcast timer so it doesn't spawn conflicting tasks while we await
+        self._sharing_starting = True
         self.osd("Starting Cloudflare tunnel... (~10 sec)", 10000)
         self.lbl_share.setText("  Starting tunnel...")
-        await self._file_server.start(fname)
-        cf_url = await self._cf_tunnel.start()
+        try:
+            await self._file_server.start(fname)
+            cf_url = await self._cf_tunnel.start()
+        finally:
+            self._sharing_starting = False   # always resume broadcasting
+
         if not cf_url:
             self.osd("cloudflared not found! Run: winget install Cloudflare.cloudflared", 6000)
             self.lbl_share.setText("  Install cloudflared first")
@@ -625,7 +633,7 @@ class VLCSyncClient(QMainWindow):
                 self.lbl_sync.setText(f"Drift {drift}ms")
 
     def _broadcast(self):
-        if not self.is_controller or not self.ws: return
+        if not self.is_controller or not self.ws or getattr(self, '_sharing_starting', False): return
         state = self.media_player.get_state()
         asyncio.ensure_future(self._safe_send({
             "type": "sync", "state": state.value if state else 0,
