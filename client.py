@@ -146,17 +146,47 @@ class LocalFileServer:
 
 
 class CloudflareTunnel:
+    # Common Windows install locations when cloudflared is not on PATH
+    _FALLBACK_PATHS = [
+        r"C:\Program Files (x86)\cloudflared\cloudflared.exe",
+        r"C:\Program Files\cloudflared\cloudflared.exe",
+    ]
+
+    @staticmethod
+    def _find_exe():
+        import shutil
+        found = shutil.which("cloudflared")
+        if found:
+            return found
+        # Also search WinGet packages directory dynamically
+        winget_base = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages")
+        if os.path.isdir(winget_base):
+            for folder in os.listdir(winget_base):
+                if "cloudflared" in folder.lower():
+                    candidate = os.path.join(winget_base, folder, "cloudflared.exe")
+                    if os.path.isfile(candidate):
+                        return candidate
+        for p in CloudflareTunnel._FALLBACK_PATHS:
+            if os.path.isfile(p):
+                return p
+        return None
+
     def __init__(self):
         self._proc = None
         self.url = None
 
     async def start(self):
+        exe = self._find_exe()
+        if not exe:
+            logging.error("cloudflared not found in PATH or common install locations.")
+            return None
+        logging.info(f"Using cloudflared at: {exe}")
         try:
             self._proc = await asyncio.create_subprocess_exec(
-                "cloudflared", "tunnel", "--url", f"http://localhost:{STREAM_PORT}", "--no-autoupdate",
+                exe, "tunnel", "--url", f"http://localhost:{STREAM_PORT}", "--no-autoupdate",
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-        except FileNotFoundError:
-            logging.error("cloudflared not installed.")
+        except Exception as e:
+            logging.error(f"Failed to start cloudflared: {e}")
             return None
         pat = re.compile(r"https://[a-z0-9\-]+\.trycloudflare\.com")
         try:
